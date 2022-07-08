@@ -132,6 +132,7 @@ class ARView extends StatefulWidget {
   final String permissionPromptDescription;
   final String permissionPromptButtonText;
   final String permissionPromptParentalRestriction;
+  final bool enableAugmentedFaces;
 
   /// Function to be called when the AR View is created
   final ARViewCreatedCallback onARViewCreated;
@@ -144,14 +145,15 @@ class ARView extends StatefulWidget {
 
   ARView(
       {Key? key,
-      required this.onARViewCreated,
+      required this.onARViewCreated, //onArCoreViewCreated
       this.planeDetectionConfig = PlaneDetectionConfig.none,
       this.showPlatformType = false,
       this.permissionPromptDescription =
           "Camera permission must be given to the app for AR functions to work",
       this.permissionPromptButtonText = "Grant Permission",
       this.permissionPromptParentalRestriction =
-          "Camera permission is restriced by the OS, please check parental control settings"})
+          "Camera permission is restriced by the OS, please check parental control settings",
+      this.enableAugmentedFaces = false}) //enableAugmentedFaces
       : super(key: key);
   @override
   _ARViewState createState() => _ARViewState(

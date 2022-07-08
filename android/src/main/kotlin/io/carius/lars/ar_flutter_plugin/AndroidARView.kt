@@ -34,6 +34,7 @@ import java.nio.FloatBuffer
 import java.util.concurrent.CompletableFuture
 
 import android.R
+import android.graphics.BitmapFactory
 import com.google.ar.sceneform.rendering.*
 
 import android.view.ViewGroup
@@ -90,6 +91,10 @@ internal class AndroidARView(
 
     private lateinit var sceneUpdateListener: com.google.ar.sceneform.Scene.OnUpdateListener
     private lateinit var onNodeTapListener: com.google.ar.sceneform.Scene.OnPeekTouchListener
+    private var faceSceneUpdateListener: com.google.ar.sceneform.Scene.OnUpdateListener
+    private var faceMeshTexture: Texture? = null
+    private val faceNodeMap = HashMap<AugmentedFace, AugmentedFaceNode>()
+    private var faceRegionsRenderable: ModelRenderable? = null
 
     // Method channel handlers
     private val onSessionMethodCall =
@@ -109,6 +114,7 @@ internal class AndroidARView(
                             }
                         }
                         "getCameraPose" -> {
+                            //TODO get front camera
                             val cameraPose = arSceneView.arFrame?.camera?.displayOrientedPose
                             if (cameraPose != null) {
                                 result.success(serializePose(cameraPose!!))
@@ -161,6 +167,7 @@ internal class AndroidARView(
                         "init" -> {
                             // objectManagerChannel.invokeMethod("onError", listOf("ObjectTEST from
                             // Android"))
+                            arScenViewInit(call, result)
                         }
                         "addNode" -> {
                             val dict_node: HashMap<String, Any>? = call.arguments as? HashMap<String, Any>
@@ -172,6 +179,12 @@ internal class AndroidARView(
                                     null
                                 }
                             }
+                        }
+                        "loadMesh" -> {
+                            val map = call.arguments as HashMap<*, *>
+                            val textureBytes = map["textureBytes"] as ByteArray
+                            val skin3DModelFilename = map["skin3DModelFilename"] as? String
+                            loadMesh(textureBytes, skin3DModelFilename)
                         }
                         "addNodeToPlaneAnchor" -> {
                             val dict_node: HashMap<String, Any>? = call.argument<HashMap<String, Any>>("node")
@@ -286,6 +299,40 @@ internal class AndroidARView(
                 }
             }
 
+    fun loadMesh(textureBytes: ByteArray?, skin3DModelFilename: String?) {
+        if (skin3DModelFilename != null) {
+            // Load the face regions renderable.
+            // This is a skinned model that renders 3D objects mapped to the regions of the augmented face.
+            ModelRenderable.builder()
+                    .setSource(activity, Uri.parse(skin3DModelFilename))
+                    .build()
+                    .thenAccept { modelRenderable ->
+                        faceRegionsRenderable = modelRenderable
+                        modelRenderable.isShadowCaster = false
+                        modelRenderable.isShadowReceiver = false
+                    }
+        }
+
+        // Load the face mesh texture.
+        Texture.builder()
+                //.setSource(activity, Uri.parse("fox_face_mesh_texture.png"))
+                .setSource(BitmapFactory.decodeByteArray(textureBytes, 0, textureBytes!!.size))
+                .build()
+                .thenAccept { texture -> faceMeshTexture = texture }
+    }
+
+    private fun arScenViewInit(call: MethodCall, result: MethodChannel.Result) {
+        val enableAugmentedFaces: Boolean? = call.argument("enableAugmentedFaces")
+        if (enableAugmentedFaces != null && enableAugmentedFaces) {
+            // This is important to make sure that the camera stream renders first so that
+            // the face mesh occlusion works correctly.
+            arSceneView.cameraStreamRenderPriority = Renderable.RENDER_PRIORITY_FIRST
+            arSceneView.scene?.addOnUpdateListener(faceSceneUpdateListener)
+        }
+
+        result.success(null)
+    }
+
     override fun getView(): View {
         return arSceneView
     }
@@ -314,6 +361,47 @@ internal class AndroidARView(
         sessionManagerChannel.setMethodCallHandler(onSessionMethodCall)
         objectManagerChannel.setMethodCallHandler(onObjectMethodCall)
         anchorManagerChannel.setMethodCallHandler(onAnchorMethodCall)
+        faceSceneUpdateListener = Scene.OnUpdateListener { frameTime ->
+            run {
+                //                if (faceRegionsRenderable == null || faceMeshTexture == null) {
+                if (faceMeshTexture == null) {
+                    return@OnUpdateListener
+                }
+                val faceList = arSceneView?.session?.getAllTrackables(AugmentedFace::class.java)
+
+                faceList?.let {
+                    // Make new AugmentedFaceNodes for any new faces.
+                    for (face in faceList) {
+                        if (!faceNodeMap.containsKey(face)) {
+                            val faceNode = AugmentedFaceNode(face)
+                            faceNode.setParent(arSceneView?.scene)
+                            faceNode.faceRegionsRenderable = faceRegionsRenderable
+                            faceNode.faceMeshTexture = faceMeshTexture
+                            faceNodeMap[face] = faceNode
+
+                            // change assets on runtime
+                        } else if(faceNodeMap[face]?.faceRegionsRenderable != faceRegionsRenderable  ||  faceNodeMap[face]?.faceMeshTexture != faceMeshTexture ){
+                            faceNodeMap[face]?.faceRegionsRenderable = faceRegionsRenderable
+                            faceNodeMap[face]?.faceMeshTexture = faceMeshTexture
+                        }
+                    }
+
+                    // Remove any AugmentedFaceNodes associated with an AugmentedFace that stopped tracking.
+                    val iter = faceNodeMap.iterator()
+                    while (iter.hasNext()) {
+                        val entry = iter.next()
+                        val face = entry.key
+                        if (face.trackingState == TrackingState.STOPPED) {
+                            val faceNode = entry.value
+                            faceNode.setParent(null)
+                            iter.remove()
+                        }
+                    }
+                }
+            }
+        }
+
+
 
         //Original visualizer: com.google.ar.sceneform.ux.R.raw.sceneform_footprint
 
@@ -397,6 +485,7 @@ internal class AndroidARView(
                     return
                 } else {
                     val config = Config(session)
+                    config.augmentedFaceMode = Config.AugmentedFaceMode.MESH3D
                     config.updateMode = Config.UpdateMode.LATEST_CAMERA_IMAGE
                     config.focusMode = Config.FocusMode.AUTO
                     session.configure(config)
@@ -455,6 +544,7 @@ internal class AndroidARView(
             arSceneView.session?.close()
             arSceneView.destroy()
             arSceneView.scene?.removeOnUpdateListener(sceneUpdateListener)
+            arSceneView.scene?.removeOnUpdateListener(faceSceneUpdateListener)
             arSceneView.scene?.removeOnPeekTouchListener(onNodeTapListener)
         }catch (e : Exception){
             e.printStackTrace();

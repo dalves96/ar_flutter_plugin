@@ -10,6 +10,7 @@ import 'package:ar_flutter_plugin_example/examples/cloudanchorexample.dart';
 import 'package:ar_flutter_plugin_example/examples/localandwebobjectsexample.dart';
 import 'package:ar_flutter_plugin_example/examples/debugoptionsexample.dart';
 
+import 'examples/augmentedface.dart';
 import 'examples/objectgesturesexample.dart';
 import 'examples/screenshotexample.dart';
 
@@ -77,6 +78,11 @@ class ExampleList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final examples = [
+      Example(
+          'Augmented Faces',
+          'Visualize Augmented Faces',
+              () => Navigator.push(context,
+              MaterialPageRoute(builder: (context) => AugmentedFace()))),
       Example(
           'Debug Options',
           'Visualize feature points, planes and world coordinate system',
