@@ -46,10 +46,25 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+
   # To add assets to your application, add an assets section, like this:
   assets:
     - Images/triangle.png
     - Models/Chicken_01/
+    - assets/AndroidRobot.gif
+    - assets/ArcticFox.gif
+    - assets/TocoToucan.gif
+    - assets/fox_face_mesh_texture.png
+    - assets/prova_texture.png
+    - assets/venom.jpg
+    - assets/venom_with_eyes.jpg
+    - assets/earth.jpg
+    - assets/earth_augmented_image.jpg
+    - assets/copertina.jpg
+    - assets/umano_digitale.png
+    - assets/myimages.imgdb
+    - assets/topolino.jpg
+    - assets/tomahawk-safety-glasses.png
   #   - images/a_dot_ham.jpeg
 
   # An image asset can refer to one or more resolution-specific "variants", see

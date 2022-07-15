@@ -26,7 +26,7 @@ apply plugin: 'kotlin-android'
 apply from: "$flutterRoot/packages/flutter_tools/gradle/flutter.gradle"
 
 android {
-    compileSdkVersion flutter.compileSdkVersion
+    compileSdkVersion 33
     ndkVersion flutter.ndkVersion
 
     sourceSets {
@@ -35,9 +35,9 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId "io.carius.lars.ar_flutter_plugin_example"
+        applicationId "project.dalves.ar_glasses"
         minSdkVersion 24
-        targetSdkVersion flutter.targetSdkVersion
+        targetSdkVersion 30
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
     }
@@ -45,10 +45,14 @@ android {
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
+            debuggable true
+            jniDebuggable true
         }
 
         release {
             signingConfig signingConfigs.debug
+            debuggable true
+            jniDebuggable true
         }
     }
 }
@@ -59,6 +63,20 @@ flutter {
 
 dependencies {
     implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlin_version"
+    implementation 'com.google.ar:core:1.32.0'
+    // Provides ArFragment, and other UX resources.
+    implementation 'com.google.ar.sceneform.ux:sceneform-ux:1.17.1'
+    // Alternatively, use ArSceneView without the UX dependency.
+    implementation 'com.google.ar.sceneform:core:1.17.1'
+    implementation "com.google.ar.sceneform:animation:1.17.1"
+    implementation project(':ar_flutter_plugin')
 }
 
+apply plugin: 'com.google.ar.sceneform.plugin'
 apply plugin: 'com.google.gms.google-services'
+
+sceneform.asset('sampledata/fox_face.fbx',
+        'sampledata/fox_face_material.mat',
+        'sampledata/fox_face.sfa',
+        'src/main/assets/fox_face')
+

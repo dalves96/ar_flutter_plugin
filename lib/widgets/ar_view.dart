@@ -92,7 +92,6 @@ class IosARView implements PlatformARView {
   BuildContext? _context;
   ARViewCreatedCallback? _arViewCreatedCallback;
   PlaneDetectionConfig? _planeDetectionConfig;
-
   @override
   void onPlatformViewCreated(int id) {
     print("iOS platform view created!");
@@ -141,6 +140,7 @@ class ARView extends StatefulWidget {
 
   /// Configures whether or not to display the device's platform type above the AR view. Defaults to false
   final bool showPlatformType;
+  final bool enableAugmentedFaces;
 
   ARView(
       {Key? key,
@@ -151,7 +151,8 @@ class ARView extends StatefulWidget {
           "Camera permission must be given to the app for AR functions to work",
       this.permissionPromptButtonText = "Grant Permission",
       this.permissionPromptParentalRestriction =
-          "Camera permission is restriced by the OS, please check parental control settings"})
+          "Camera permission is restriced by the OS, please check parental control settings",
+        this.enableAugmentedFaces = false})
       : super(key: key);
   @override
   _ARViewState createState() => _ARViewState(

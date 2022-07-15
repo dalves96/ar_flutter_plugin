@@ -22,7 +22,7 @@ class ARObjectManager {
 
   /// Debugging status flag. If true, all platform calls are printed. Defaults to false.
   final bool debug;
-
+  final bool? enableAugmentedFaces;
   /// Callback function that is invoked when the platform detects a tap on a node
   NodeTapResultHandler? onNodeTap;
   NodePanStartHandler? onPanStart;
@@ -32,7 +32,7 @@ class ARObjectManager {
   NodeRotationChangeHandler? onRotationChange;
   NodeRotationEndHandler? onRotationEnd;
 
-  ARObjectManager(int id, {this.debug = false}) {
+  ARObjectManager(int id, {this.debug = false, this.enableAugmentedFaces = false}) {
     _channel = MethodChannel('arobjects_$id');
     _channel.setMethodCallHandler(_platformCallHandler);
     if (debug) {
@@ -116,7 +116,7 @@ class ARObjectManager {
 
   /// Sets up the AR Object Manager
   onInitialize() {
-    _channel.invokeMethod<void>('init', {});
+    _channel.invokeMethod<void>('init', { 'enableAugmentedFaces': enableAugmentedFaces});
   }
 
   /// Add given node to the given anchor of the underlying AR scene (or to its top-level if no anchor is given) and listen to any changes made to its transformation
@@ -139,6 +139,14 @@ class ARObjectManager {
     } on PlatformException catch (e) {
       return false;
     }
+  }
+
+  Future<void> loadMesh(
+      {required Uint8List textureBytes, required String skin3DModelFilename}) {
+    return _channel.invokeMethod('loadMesh', {
+      'textureBytes': textureBytes,
+      'skin3DModelFilename': skin3DModelFilename
+    });
   }
 
   /// Remove given node from the AR Scene
