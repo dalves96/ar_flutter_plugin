@@ -1,4 +1,4 @@
-export 'package:ar_flutter_plugin/widgets/ar_view.dart';
+export 'package:ar_augmented_faces/widgets/ar_view.dart';
 
 import 'dart:async';
 
@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 
 class ArFlutterPlugin {
   static const MethodChannel _channel =
-      const MethodChannel('ar_flutter_plugin');
+      const MethodChannel('ar_augmented_faces');
 
   /// Private constructor to prevent accidental instantiation of the Plugin using the implicit default constructor
   ArFlutterPlugin._();

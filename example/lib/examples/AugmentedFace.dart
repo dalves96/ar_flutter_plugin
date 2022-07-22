@@ -1,12 +1,12 @@
 import 'dart:typed_data';
 
-import 'package:ar_flutter_plugin/managers/ar_location_manager.dart';
-import 'package:ar_flutter_plugin/managers/ar_session_manager.dart';
-import 'package:ar_flutter_plugin/managers/ar_object_manager.dart';
-import 'package:ar_flutter_plugin/managers/ar_anchor_manager.dart';
+import 'package:ar_augmented_faces/managers/ar_location_manager.dart';
+import 'package:ar_augmented_faces/managers/ar_session_manager.dart';
+import 'package:ar_augmented_faces/managers/ar_object_manager.dart';
+import 'package:ar_augmented_faces/managers/ar_anchor_manager.dart';
 import 'package:flutter/material.dart';
-import 'package:ar_flutter_plugin/ar_flutter_plugin.dart';
-import 'package:ar_flutter_plugin/datatypes/config_planedetection.dart';
+import 'package:ar_augmented_faces/ar_augmented_faces.dart';
+import 'package:ar_augmented_faces/datatypes/config_planedetection.dart';
 import 'package:flutter/services.dart';
 
 class AugmentedFace extends StatefulWidget {

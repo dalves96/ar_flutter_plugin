@@ -1,4 +1,4 @@
-package io.carius.lars.ar_flutter_plugin
+package io.carius.lars.ar_augmented_faces
 
 import android.app.Activity
 import android.app.Application
@@ -22,11 +22,11 @@ import com.google.ar.sceneform.rendering.*
 import com.google.ar.sceneform.ux.AugmentedFaceNode
 import com.google.ar.sceneform.ux.FootprintSelectionVisualizer
 import com.google.ar.sceneform.ux.TransformationSystem
-import io.carius.lars.ar_flutter_plugin.Serialization.deserializeMatrix4
-import io.carius.lars.ar_flutter_plugin.Serialization.serializeAnchor
-import io.carius.lars.ar_flutter_plugin.Serialization.serializeHitResult
-import io.carius.lars.ar_flutter_plugin.Serialization.serializePose
-import io.carius.lars.ar_flutter_plugin.utils.ArCoreUtils
+import io.carius.lars.ar_augmented_faces.Serialization.deserializeMatrix4
+import io.carius.lars.ar_augmented_faces.Serialization.serializeAnchor
+import io.carius.lars.ar_augmented_faces.Serialization.serializeHitResult
+import io.carius.lars.ar_augmented_faces.Serialization.serializePose
+import io.carius.lars.ar_augmented_faces.utils.ArCoreUtils
 import io.flutter.FlutterInjector
 import io.flutter.embedding.engine.loader.FlutterLoader
 import io.flutter.plugin.common.BinaryMessenger

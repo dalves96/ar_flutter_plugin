@@ -1,4 +1,4 @@
-package io.carius.lars.ar_flutter_plugin.utils
+package io.carius.lars.ar_augmented_faces.utils
 
 import android.Manifest
 import android.app.Activity

@@ -1,6 +1,6 @@
-import 'package:ar_flutter_plugin/datatypes/anchor_types.dart';
-import 'package:ar_flutter_plugin/models/ar_node.dart';
-import 'package:ar_flutter_plugin/utils/json_converters.dart';
+import 'package:ar_augmented_faces/datatypes/anchor_types.dart';
+import 'package:ar_augmented_faces/models/ar_node.dart';
+import 'package:ar_augmented_faces/utils/json_converters.dart';
 import 'package:vector_math/vector_math_64.dart';
 import 'package:flutter/widgets.dart';
 

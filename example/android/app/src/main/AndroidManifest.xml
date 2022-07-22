@@ -1,5 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="io.carius.lars.ar_flutter_plugin_example">
+    package="io.carius.lars.ar_augmented_faces_example">
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
@@ -9,7 +9,7 @@
 <!--        android:name="android.hardware.camera.ar"-->
 <!--        android:required="true" />-->
     <application
-        android:label="ar_flutter_plugin_example"
+        android:label="ar_augmented_faces_example"
         android:icon="@mipmap/ic_launcher"
         android:debuggable="true">
         <activity
