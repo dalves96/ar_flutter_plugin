@@ -1,4 +1,4 @@
-package io.carius.lars.ar_augmented_faces.utils
+package project.dalves.ar_augmented_faces.utils
 
 import android.Manifest
 import android.app.Activity

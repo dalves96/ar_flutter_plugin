@@ -1,4 +1,4 @@
-package io.carius.lars.ar_augmented_faces
+package project.dalves.ar_augmented_faces
 
 import androidx.annotation.NonNull
 import io.flutter.embedding.engine.plugins.FlutterPlugin

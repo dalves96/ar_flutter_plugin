@@ -30,7 +30,7 @@ flutter:
   plugin:
     platforms:
       android:
-        package: io.carius.lars.ar_augmented_faces
+        package: project.dalves.ar_augmented_faces
         pluginClass: ArFlutterPlugin
       ios:
         pluginClass: ArFlutterPlugin

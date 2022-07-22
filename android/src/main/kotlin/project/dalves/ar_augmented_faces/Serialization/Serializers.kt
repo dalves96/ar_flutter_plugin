@@ -1,4 +1,4 @@
-package io.carius.lars.ar_augmented_faces.Serialization
+package project.dalves.ar_augmented_faces.Serialization
 
 import com.google.ar.core.*
 import com.google.ar.sceneform.AnchorNode

@@ -1,4 +1,4 @@
-group 'io.carius.lars.ar_augmented_faces'
+group 'project.dalves.ar_augmented_faces'
 version '1.0-SNAPSHOT'
 
 buildscript {
