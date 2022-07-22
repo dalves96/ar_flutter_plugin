@@ -211,12 +211,13 @@ class _ARViewState extends State<ARView> {
       case (PermissionStatus.granted):
         {
           return Column(children: [
-            if (showPlatformType) Text(Theme.of(context).platform.toString()),
+            // if (showPlatformType)
+            // Text(Theme.of(context).platform.toString()),
             Expanded(
                 child: PlatformARView(Theme.of(context).platform).build(
                     context: context,
                     arViewCreatedCallback: widget.onARViewCreated,
-                    planeDetectionConfig: widget.planeDetectionConfig)),
+                    planeDetectionConfig: widget.planeDetectionConfig) ),
           ]);
         }
       case (PermissionStatus.denied):

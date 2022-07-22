@@ -1,6 +1,5 @@
 package io.carius.lars.ar_flutter_plugin
 
-import android.R
 import android.app.Activity
 import android.app.Application
 import android.content.Context
@@ -8,14 +7,12 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
-import android.os.Environment
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
 import android.view.MotionEvent
 import android.view.PixelCopy
 import android.view.View
-import android.view.ViewGroup
 import com.google.ar.core.*
 import com.google.ar.core.exceptions.CameraNotAvailableException
 import com.google.ar.core.exceptions.UnavailableException
@@ -37,288 +34,207 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.platform.PlatformView
 import java.io.ByteArrayOutputStream
-import java.io.File
 import java.io.IOException
 import java.nio.FloatBuffer
-import java.util.concurrent.CompletableFuture
 
 
 internal class AndroidARView(
-        val activity: Activity,
+        private val activity: Activity,
         context: Context,
         messenger: BinaryMessenger,
-        id: Int,
-        creationParams: Map<String?, Any?>?
-) : PlatformView, MethodChannel.MethodCallHandler  {
+        id: Int
+) : PlatformView, MethodChannel.MethodCallHandler {
     // constants
-    private val TAG: String = AndroidARView::class.java.name
+    private val tag: String = AndroidARView::class.java.name
+
     // Lifecycle variables
-//    private var mUserRequestedInstall = true
     private var footprintSelectionVisualizer = FootprintSelectionVisualizer()
-    lateinit var activityLifecycleCallbacks: Application.ActivityLifecycleCallbacks
+    private lateinit var activityLifecycleCallbacks: Application.ActivityLifecycleCallbacks
     private val viewContext: Context
+
     // Platform channels
     private val sessionManagerChannel: MethodChannel = MethodChannel(messenger, "arsession_$id")
     private val objectManagerChannel: MethodChannel = MethodChannel(messenger, "arobjects_$id")
     private val anchorManagerChannel: MethodChannel = MethodChannel(messenger, "aranchors_$id")
+
     // UI variables
-    private var arSceneView: ArSceneView? =null
-    private lateinit var transformationSystem: TransformationSystem
+    private var arSceneView: ArSceneView? = null
+    private var transformationSystem: TransformationSystem
     private var showFeaturePoints = false
-    private var showAnimatedGuide = false
-    private lateinit var animatedGuide: View
+
     private var pointCloudNode = Node()
     private var worldOriginNode = Node()
+
     // Setting defaults
     private var enableRotation = false
     private var enablePans = false
-    private var keepNodeSelected = true;
+    private var keepNodeSelected = true
+
     // Model builder
     private var modelBuilder = ArModelBuilder()
+
     // Cloud anchor handler
     private lateinit var cloudAnchorHandler: CloudAnchorHandler
 
-    private lateinit var sceneUpdateListener: com.google.ar.sceneform.Scene.OnUpdateListener
-    private lateinit var onNodeTapListener: com.google.ar.sceneform.Scene.OnPeekTouchListener
+    private lateinit var sceneUpdateListener: Scene.OnUpdateListener
+    private lateinit var onNodeTapListener: Scene.OnPeekTouchListener
 
-    private var faceSceneUpdateListener: com.google.ar.sceneform.Scene.OnUpdateListener
+    private var faceSceneUpdateListener: Scene.OnUpdateListener
     private var faceMeshTexture: Texture? = null
     private val faceNodeMap = HashMap<AugmentedFace, AugmentedFaceNode>()
-    private var faceRegionsRenderable: ModelRenderable? = null
-    private val RC_PERMISSIONS = 0x123
-    protected var isSupportedDevice = false
-    protected var installRequested: Boolean = false
-    protected val methodChannel: MethodChannel = MethodChannel(messenger, "arcore_flutter_plugin_$id")
+    private var faceRegionsRender: ModelRenderable? = null
+    private val rcPermissions = 0x123
+    private var isSupportedDevice = false
+    private var installRequested: Boolean = false
+    private val methodChannel: MethodChannel = MethodChannel(messenger, "arcore_flutter_plugin_$id")
+
     // Method channel handlers
     private val onSessionMethodCall =
-            object : MethodChannel.MethodCallHandler {
-                override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
-                    Log.d(TAG, "AndroidARView onsessionmethodcall reveived a call!")
+            MethodChannel.MethodCallHandler { call, result ->
+                Log.d(tag, "AndroidARView onSessionMethodCall received a call!")
+                when (call.method) {
+                    "init" -> {
+                        initializeARView(call, result)
+                    }
+                    "getAnchorPose" -> {
+                        val anchorNode = arSceneView!!.scene.findByName(call.argument("anchorId")) as AnchorNode?
+                        if (anchorNode != null) {
+                            result.success(serializePose(anchorNode.anchor!!.pose))
+                        } else {
+                            result.error("Error", "could not get anchor pose", null)
+                        }
+                    }
+                    "getCameraPose" -> {
+                        val cameraPose = arSceneView!!.arFrame?.camera?.displayOrientedPose
+                        if (cameraPose != null) {
+                            result.success(serializePose(cameraPose))
+                        } else {
+                            result.error("Error", "could not get camera pose", null)
+                        }
+                    }
+                    "snapshot" -> {
+                        val bitmap = Bitmap.createBitmap(arSceneView!!.width, arSceneView!!.height,
+                                Bitmap.Config.ARGB_8888)
+
+                        // Create a handler thread to offload the processing of the image.
+                        val handlerThread = HandlerThread("PixelCopier")
+                        handlerThread.start()
+                        // Make the request to copy.
+                        PixelCopy.request(arSceneView!!, bitmap, { copyResult: Int ->
+                            Log.d(tag, "PIXEL COPY DONE")
+                            if (copyResult == PixelCopy.SUCCESS) {
+                                try {
+                                    val mainHandler = Handler(context.mainLooper)
+                                    val runnable = Runnable {
+                                        val stream = ByteArrayOutputStream()
+                                        bitmap.compress(Bitmap.CompressFormat.PNG, 90, stream)
+                                        val data = stream.toByteArray()
+                                        result.success(data)
+                                    }
+                                    mainHandler.post(runnable)
+                                } catch (e: IOException) {
+                                    result.error("e", e.message, e.stackTrace)
+                                }
+                            } else {
+                                result.error("e", "failed to take screenshot", null)
+                            }
+                            handlerThread.quitSafely()
+                        }, Handler(handlerThread.looper))
+                    }
+                    "dispose" -> {
+                        dispose()
+                    }
+                    else -> {}
+                }
+            }
+    private val onObjectMethodCall =
+            MethodChannel.MethodCallHandler { call, result ->
+                if (isSupportedDevice) {
                     when (call.method) {
                         "init" -> {
-                            initializeARView(call, result)
+                            arSceneViewInit(result)
                         }
-                        "getAnchorPose" -> {
-                            val anchorNode = arSceneView!!.scene.findByName(call.argument("anchorId")) as AnchorNode?
-                            if (anchorNode != null) {
-                                result.success(serializePose(anchorNode.anchor!!.pose))
-                            } else {
-                                result.error("Error", "could not get anchor pose", null)
-                            }
-                        }
-                        "getCameraPose" -> {
-                            val cameraPose = arSceneView!!.arFrame?.camera?.displayOrientedPose
-                            if (cameraPose != null) {
-                                result.success(serializePose(cameraPose!!))
-                            } else {
-                                result.error("Error", "could not get camera pose", null)
-                            }
-                        }
-                        "snapshot" -> {
-                            var bitmap = Bitmap.createBitmap(arSceneView!!.width, arSceneView!!.height,
-                                    Bitmap.Config.ARGB_8888);
-
-
-                            // Create a handler thread to offload the processing of the image.
-                            var handlerThread = HandlerThread("PixelCopier");
-                            handlerThread.start();
-                            // Make the request to copy.
-                            PixelCopy.request(arSceneView!!, bitmap, { copyResult:Int ->
-                                Log.d(TAG, "PIXELCOPY DONE")
-                                if (copyResult == PixelCopy.SUCCESS) {
-                                    try {
-                                        val mainHandler = Handler(context.mainLooper)
-                                        val runnable = Runnable {
-                                            val stream = ByteArrayOutputStream()
-                                            bitmap.compress(Bitmap.CompressFormat.PNG, 90, stream)
-                                            val data = stream.toByteArray()
-                                            result.success(data)
-                                        }
-                                        mainHandler.post(runnable)
-                                    } catch (e: IOException) {
-                                        result.error("e", e.message, e.stackTrace);
-                                    }
-                                } else {
-                                    result.error("e", "failed to take screenshot", null);
-                                }
-                                handlerThread.quitSafely();
-                            }, Handler(handlerThread.looper));
+                        "loadMesh" -> {
+                            val map = call.arguments as HashMap<*, *>
+                            val textureBytes = map["textureBytes"] as ByteArray
+                            val skin3DModelFilename = map["skin3DModelFilename"] as? String
+                            loadMesh(textureBytes, skin3DModelFilename)
                         }
                         "dispose" -> {
                             dispose()
                         }
-                        else -> {}
-                    }
-                }
-            }
-    private val onObjectMethodCall =
-            object : MethodChannel.MethodCallHandler {
-                override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
-
-                    if(isSupportedDevice){
-                        debugLog(call.method +"called on supported device")
-                        when (call.method) {
-                            "init" -> {
-                                System.out.println("init 01 ")
-                                arScenViewInit(call, result)
-                            }
-                            "loadMesh" -> {
-                                System.out.println("01skin3DModelFilename ")
-                                val map = call.arguments as HashMap<*, *>
-                                val textureBytes = map["textureBytes"] as ByteArray
-                                val skin3DModelFilename = map["skin3DModelFilename"] as? String
-                                loadMesh(textureBytes, skin3DModelFilename)
-                            }
-                            "dispose" -> {
-                                debugLog( " updateMaterials")
-                                dispose()
-                            }
-                            else -> {
-                                result.notImplemented()
-                            }
+                        else -> {
+                            result.notImplemented()
                         }
-                    }else{
-                        debugLog("Impossible call " + call.method + " method on unsupported device")
-                        result.error("Unsupported Device","",null)
                     }
-
-//                    Log.d(TAG, "AndroidARView onobjectmethodcall reveived a call!")
-//                    when (call.method) {
-//                        "init" -> {
-//                            // objectManagerChannel.invokeMethod("onError", listOf("ObjectTEST from
-//                            // Android"))
-//                            arScenViewInit(call, result)
-//                        }
-//                        "addNode" -> {
-//                            val dict_node: HashMap<String, Any>? = call.arguments as? HashMap<String, Any>
-//                            dict_node?.let{
-//                                addNode(it).thenAccept{status: Boolean ->
-//                                    result.success(status)
-//                                }.exceptionally { throwable ->
-//                                    result.error("e", throwable.message, throwable.stackTrace)
-//                                    null
-//                                }
-//                            }
-//                        }
-//                        "loadMesh" -> {
-//                            Log.wtf("tag","2skin3DModelFilename")
-//                            System.out.println("pln 2skin3DModelFilename")
-//                            val map = call.arguments as HashMap<*, *>
-//                            val textureBytes = map["textureBytes"] as ByteArray
-//                            val skin3DModelFilename = map["skin3DModelFilename"] as? String
-//                            loadMesh(textureBytes, skin3DModelFilename)
-//                        }
-//                        "addNodeToPlaneAnchor" -> {
-//                            val dict_node: HashMap<String, Any>? = call.argument<HashMap<String, Any>>("node")
-//                            val dict_anchor: HashMap<String, Any>? = call.argument<HashMap<String, Any>>("anchor")
-//                            if (dict_node != null && dict_anchor != null) {
-//                                addNode(dict_node, dict_anchor).thenAccept{status: Boolean ->
-//                                    result.success(status)
-//                                }.exceptionally { throwable ->
-//                                    result.error("e", throwable.message, throwable.stackTrace)
-//                                    null
-//                                }
-//                            } else {
-//                                result.success(false)
-//                            }
-//
-//                        }
-//                        "removeNode" -> {
-//                            val nodeName: String? = call.argument<String>("name")
-//                            nodeName?.let{
-//                                if (transformationSystem.selectedNode?.name == nodeName){
-//                                    transformationSystem.selectNode(null)
-//                                    keepNodeSelected = true
-//                                }
-//                                val node = arSceneView!!.scene.findByName(nodeName)
-//                                node?.let{
-//                                    arSceneView!!.scene.removeChild(node)
-//                                    result.success(null)
-//                                }
-//                            }
-//                        }
-//                        "transformationChanged" -> {
-//                            val nodeName: String? = call.argument<String>("name")
-//                            val newTransformation: ArrayList<Double>? = call.argument<ArrayList<Double>>("transformation")
-//                            nodeName?.let{ name ->
-//                                newTransformation?.let{ transform ->
-//                                    transformNode(name, transform)
-//                                    result.success(null)
-//                                }
-//                            }
-//                        }
-//                        else -> {}
-//                    }
+                } else {
+                    result.error("Unsupported Device", "", null)
                 }
             }
     private val onAnchorMethodCall =
-            object : MethodChannel.MethodCallHandler {
-                override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
-                    when (call.method) {
-                        "addAnchor" -> {
-                            val anchorType: Int? = call.argument<Int>("type")
-                            if (anchorType != null){
-                                when(anchorType) {
-                                    0 -> { // Plane Anchor
-                                        val transform: ArrayList<Double>? = call.argument<ArrayList<Double>>("transformation")
-                                        val name: String? = call.argument<String>("name")
-                                        if ( name != null && transform != null){
-                                            result.success(addPlaneAnchor(transform, name))
-                                        } else {
-                                            result.success(false)
-                                        }
-
+            MethodChannel.MethodCallHandler { call, result ->
+                when (call.method) {
+                    "addAnchor" -> {
+                        val anchorType: Int? = call.argument<Int>("type")
+                        if (anchorType != null) {
+                            when (anchorType) {
+                                0 -> { // Plane Anchor
+                                    val transform: ArrayList<Double>? = call.argument<ArrayList<Double>>("transformation")
+                                    val name: String? = call.argument<String>("name")
+                                    if (name != null && transform != null) {
+                                        result.success(addPlaneAnchor(transform, name))
+                                    } else {
+                                        result.success(false)
                                     }
-                                    else -> result.success(false)
-                                }
-                            } else {
-                                result.success(false)
-                            }
-                        }
-                        "removeAnchor" -> {
-                            val anchorName: String? = call.argument<String>("name")
-                            anchorName?.let{ name ->
-                                removeAnchor(name)
-                            }
-                        }
-                        "initGoogleCloudAnchorMode" -> {
-                            if (arSceneView!!.session != null) {
-                                val config = Config(arSceneView!!.session)
-                                config.augmentedFaceMode = Config.AugmentedFaceMode.MESH3D
-                                config.cloudAnchorMode = Config.CloudAnchorMode.ENABLED
-                                config.updateMode = Config.UpdateMode.LATEST_CAMERA_IMAGE
-                                config.focusMode = Config.FocusMode.AUTO
-                                arSceneView!!.session?.configure(config)
 
-                                cloudAnchorHandler = CloudAnchorHandler(arSceneView!!.session!!)
-                            } else {
-                                sessionManagerChannel.invokeMethod("onError", listOf("Error initializing cloud anchor mode: Session is null"))
-                            }
-                        }
-                        "uploadAnchor" ->  {
-                            val anchorName: String? = call.argument<String>("name")
-                            val ttl: Int? = call.argument<Int>("ttl")
-                            anchorName?.let {
-                                val anchorNode = arSceneView!!.scene.findByName(anchorName) as AnchorNode?
-                                if (ttl != null) {
-                                    cloudAnchorHandler.hostCloudAnchorWithTtl(anchorName, anchorNode!!.anchor, cloudAnchorUploadedListener(), ttl!!)
-                                } else {
-                                    cloudAnchorHandler.hostCloudAnchor(anchorName, anchorNode!!.anchor, cloudAnchorUploadedListener())
                                 }
-                                //Log.d(TAG, "---------------- HOSTING INITIATED ------------------")
-                                result.success(true)
+                                else -> result.success(false)
                             }
-
+                        } else {
+                            result.success(false)
                         }
-                        "downloadAnchor" -> {
-                            val anchorId: String? = call.argument<String>("cloudanchorid")
-                            //Log.d(TAG, "---------------- RESOLVING INITIATED ------------------")
-                            anchorId?.let {
-                                cloudAnchorHandler.resolveCloudAnchor(anchorId, cloudAnchorDownloadedListener())
-                            }
-                        }
-                        else -> {}
                     }
+                    "removeAnchor" -> {
+                        val anchorName: String? = call.argument<String>("name")
+                        anchorName?.let { name ->
+                            removeAnchor(name)
+                        }
+                    }
+                    "initGoogleCloudAnchorMode" -> {
+                        if (arSceneView!!.session != null) {
+                            val config = Config(arSceneView!!.session)
+                            config.augmentedFaceMode = Config.AugmentedFaceMode.MESH3D
+                            config.cloudAnchorMode = Config.CloudAnchorMode.ENABLED
+                            config.updateMode = Config.UpdateMode.LATEST_CAMERA_IMAGE
+                            config.focusMode = Config.FocusMode.AUTO
+                            arSceneView!!.session?.configure(config)
+
+                            cloudAnchorHandler = CloudAnchorHandler(arSceneView!!.session!!)
+                        } else {
+                            sessionManagerChannel.invokeMethod("onError", listOf("Error initializing cloud anchor mode: Session is null"))
+                        }
+                    }
+                    "uploadAnchor" -> {
+                        val anchorName: String? = call.argument<String>("name")
+                        val ttl: Int? = call.argument<Int>("ttl")
+                        anchorName?.let {
+                            val anchorNode = arSceneView!!.scene.findByName(anchorName) as AnchorNode?
+                            if (ttl != null) {
+                                cloudAnchorHandler.hostCloudAnchorWithTtl(anchorName, anchorNode!!.anchor, CloudAnchorUploadedListener(), ttl)
+                            } else {
+                                cloudAnchorHandler.hostCloudAnchor(anchorName, anchorNode!!.anchor, CloudAnchorUploadedListener())
+                            }
+                            result.success(true)
+                        }
+
+                    }
+                    "downloadAnchor" -> {
+                        val anchorId: String? = call.argument<String>("cloudanchorid")
+                        anchorId?.let {
+                            cloudAnchorHandler.resolveCloudAnchor(anchorId, CloudAnchorDownloadedListener())
+                        }
+                    }
+                    else -> {}
                 }
             }
 
@@ -326,94 +242,33 @@ internal class AndroidARView(
         return arSceneView as View
     }
 
-    fun loadMesh(textureBytes: ByteArray?, skin3DModelFilename: String?) {
+    private fun loadMesh(textureBytes: ByteArray?, skin3DModelFilename: String?) {
         if (skin3DModelFilename != null) {
-            // Load the face regions renderable.
+            // Load the face regions render.
             // This is a skinned model that renders 3D objects mapped to the regions of the augmented face.
-            System.out.println("skin3DModelFilename " +  skin3DModelFilename)
-            //CHECK file PATH
-            System.out.println("PATH skin3DModelFilename " +  Uri.parse(skin3DModelFilename))
-            val path: File = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
-            System.out.println("path skin3DModelFilename " +  path)
             ModelRenderable.builder()
                     .setSource(activity, Uri.parse(skin3DModelFilename))
                     .build()
                     .thenAccept { modelRenderable ->
-                        faceRegionsRenderable = modelRenderable
+                        faceRegionsRender = modelRenderable
                         modelRenderable.isShadowCaster = false
                         modelRenderable.isShadowReceiver = false
                     }
-///TODO CHECK THIS
-//            val sceneView: ArSceneView = arFragment.getArSceneView()
-//
-//            // This is important to make sure that the camera stream renders first so that
-//            // the face mesh occlusion works correctly.
-//
-//            // This is important to make sure that the camera stream renders first so that
-//            // the face mesh occlusion works correctly.
-//            sceneView.cameraStreamRenderPriority = Renderable.RENDER_PRIORITY_FIRST
         }
 
         // Load the face mesh texture.
         Texture.builder()
-                //.setSource(activity, Uri.parse("fox_face_mesh_texture.png"))
                 .setSource(BitmapFactory.decodeByteArray(textureBytes, 0, textureBytes!!.size))
                 .build()
                 .thenAccept { texture -> faceMeshTexture = texture }
     }
 
-    private fun arScenViewInit(call: MethodCall, result: MethodChannel.Result) {
-        val enableAugmentedFaces: Boolean? = true// call.argument("enableAugmentedFaces")
-        Log.d(TAG, "test2!! " + enableAugmentedFaces)
-        if (enableAugmentedFaces != null && enableAugmentedFaces) {
+    private fun arSceneViewInit(result: MethodChannel.Result) {
+        val enableAugmentedFaces = true// call.argument("enableAugmentedFaces")
+        if (enableAugmentedFaces) {
             // This is important to make sure that the camera stream renders first so that
             // the face mesh occlusion works correctly.
             arSceneView!!.cameraStreamRenderPriority = Renderable.RENDER_PRIORITY_FIRST
-            faceSceneUpdateListener = Scene.OnUpdateListener { frameTime ->
-                run {
-                    Log.d(TAG, "test2 ")
-                    //                if (faceRegionsRenderable == null || faceMeshTexture == null) {
-                    if (faceMeshTexture == null) {
-                        return@OnUpdateListener
-                    }
-                    val faceList = arSceneView?.session?.getAllTrackables(AugmentedFace::class.java)
-                    Log.d(TAG, "test3 " + faceList?.size)
-                    faceList?.let {
-                        // Make new AugmentedFaceNodes for any new faces.
-                        for (face in faceList) {
-                            if (!faceNodeMap.containsKey(face)) {
-                                System.out.println("01faceNodeMap ")
-                                val faceNode = AugmentedFaceNode(face)
-                                faceNode.setParent(arSceneView?.scene)
-                                faceNode.faceRegionsRenderable = faceRegionsRenderable
-                                faceNode.faceMeshTexture = faceMeshTexture
-                                faceNodeMap[face] = faceNode
-
-                                // change assets on runtime
-                            } else if(faceNodeMap[face]?.faceRegionsRenderable != faceRegionsRenderable  ||  faceNodeMap[face]?.faceMeshTexture != faceMeshTexture ){
-                                System.out.println("02faceNodeMap ")
-
-                                faceNodeMap[face]?.faceRegionsRenderable = faceRegionsRenderable
-                                faceNodeMap[face]?.faceMeshTexture = faceMeshTexture
-                            }
-                        }
-
-                        // Remove any AugmentedFaceNodes associated with an AugmentedFace that stopped tracking.
-                        val iter = faceNodeMap.iterator()
-                        while (iter.hasNext()) {
-                            val entry = iter.next()
-                            val face = entry.key
-                            if (face.trackingState == TrackingState.STOPPED) {
-                                System.out.println("faceNodeMap remove ")
-
-                                val faceNode = entry.value
-                                faceNode.setParent(null)
-                                iter.remove()
-                            }
-                        }
-                    }
-                }
-            }
             arSceneView!!.scene?.addOnUpdateListener(faceSceneUpdateListener)
         }
 
@@ -422,7 +277,6 @@ internal class AndroidARView(
 
     override fun dispose() {
         // Destroy AR session
-        Log.d(TAG, "dispose called")
         try {
             onPause()
             onDestroy()
@@ -433,78 +287,64 @@ internal class AndroidARView(
     }
 
     init {
-        Log.d(TAG, "test1 ")
         methodChannel.setMethodCallHandler(this)
         if (ArCoreUtils.checkIsSupportedDeviceOrFinish(activity)) {
             isSupportedDevice = true
             arSceneView = ArSceneView(context)
-            ArCoreUtils.requestCameraPermission(activity, RC_PERMISSIONS)
-            setupLifeCycle(context)
+            ArCoreUtils.requestCameraPermission(activity, rcPermissions)
+            setupLifeCycle()
         }
-        Log.d(TAG, "test1.1 ")
-        faceSceneUpdateListener = Scene.OnUpdateListener { frameTime ->
+        faceSceneUpdateListener = Scene.OnUpdateListener {
             run {
-                Log.d(TAG, "test2 ")
-                //                if (faceRegionsRenderable == null || faceMeshTexture == null) {
                 if (faceMeshTexture == null) {
                     return@OnUpdateListener
                 }
                 val faceList = arSceneView?.session?.getAllTrackables(AugmentedFace::class.java)
-                Log.d(TAG, "test3 " + faceList?.size)
                 faceList?.let {
                     // Make new AugmentedFaceNodes for any new faces.
                     for (face in faceList) {
                         if (!faceNodeMap.containsKey(face)) {
-                            System.out.println("01faceNodeMap ")
                             val faceNode = AugmentedFaceNode(face)
                             faceNode.setParent(arSceneView?.scene)
-                            faceNode.faceRegionsRenderable = faceRegionsRenderable
+                            faceNode.faceRegionsRenderable = faceRegionsRender
                             faceNode.faceMeshTexture = faceMeshTexture
                             faceNodeMap[face] = faceNode
 
                             // change assets on runtime
-                        } else if(faceNodeMap[face]?.faceRegionsRenderable != faceRegionsRenderable  ||  faceNodeMap[face]?.faceMeshTexture != faceMeshTexture ){
-                            System.out.println("02faceNodeMap ")
-
-                            faceNodeMap[face]?.faceRegionsRenderable = faceRegionsRenderable
+                        } else if (faceNodeMap[face]?.faceRegionsRenderable != faceRegionsRender || faceNodeMap[face]?.faceMeshTexture != faceMeshTexture) {
+                            faceNodeMap[face]?.faceRegionsRenderable = faceRegionsRender
                             faceNodeMap[face]?.faceMeshTexture = faceMeshTexture
                         }
                     }
 
                     // Remove any AugmentedFaceNodes associated with an AugmentedFace that stopped tracking.
-                    val iter = faceNodeMap.iterator()
-                    while (iter.hasNext()) {
-                        val entry = iter.next()
+                    val i = faceNodeMap.iterator()
+                    while (i.hasNext()) {
+                        val entry = i.next()
                         val face = entry.key
                         if (face.trackingState == TrackingState.STOPPED) {
-                            System.out.println("faceNodeMap remove ")
-
                             val faceNode = entry.value
                             faceNode.setParent(null)
-                            iter.remove()
+                            i.remove()
                         }
                     }
                 }
             }
         }
         viewContext = context
-        Log.d(TAG, "Initializing AndroidARView")
 
         arSceneView = ArSceneView(context)
 
         // Lastly request CAMERA permission which is required by ARCore.
-        ArCoreUtils.requestCameraPermission(activity, RC_PERMISSIONS)
-        setupLifeCycle(context)
-
+        ArCoreUtils.requestCameraPermission(activity, rcPermissions)
+        setupLifeCycle()
         sessionManagerChannel.setMethodCallHandler(onSessionMethodCall)
         objectManagerChannel.setMethodCallHandler(onObjectMethodCall)
         anchorManagerChannel.setMethodCallHandler(onAnchorMethodCall)
 
-        //Original visualizer: com.google.ar.sceneform.ux.R.raw.sceneform_footprint
-
         MaterialFactory.makeTransparentWithColor(context, Color(255f, 255f, 255f, 0.3f))
                 .thenAccept { mat ->
-                    footprintSelectionVisualizer.footprintRenderable = ShapeFactory.makeCylinder(0.7f,0.05f, Vector3(0f,0f,0f), mat)
+                    footprintSelectionVisualizer.footprintRenderable = ShapeFactory.makeCylinder(0.7f, 0.05f, Vector3(0f, 0f, 0f), mat)
                 }
 
         transformationSystem =
@@ -516,68 +356,57 @@ internal class AndroidARView(
         // TODO: find out why this does not happen automatically
     }
 
-    protected fun debugLog(message: String) {
-        //debugLog(message)
-    }
-
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
-        if(isSupportedDevice){
-            debugLog(call.method +"called on supported device")
+        if (isSupportedDevice) {
             when (call.method) {
                 "init" -> {
-                    System.out.println("init 02 ")
-                    arScenViewInit(call, result)
+                    arSceneViewInit(result)
                 }
                 "loadMesh" -> {
-                    System.out.println("1skin3DModelFilename ")
                     val map = call.arguments as HashMap<*, *>
                     val textureBytes = map["textureBytes"] as ByteArray
                     val skin3DModelFilename = map["skin3DModelFilename"] as? String
                     loadMesh(textureBytes, skin3DModelFilename)
                 }
                 "dispose" -> {
-                    debugLog( " updateMaterials")
                     dispose()
                 }
                 else -> {
                     result.notImplemented()
                 }
             }
-        }else{
-            debugLog("Impossible call " + call.method + " method on unsupported device")
-            result.error("Unsupported Device","",null)
+        } else {
+            result.error("Unsupported Device", "", null)
         }
     }
 
 
-
-
-    private fun setupLifeCycle(context: Context) {
+    private fun setupLifeCycle() {
         activityLifecycleCallbacks =
                 object : Application.ActivityLifecycleCallbacks {
                     override fun onActivityCreated(
                             activity: Activity,
                             savedInstanceState: Bundle?
                     ) {
-                        Log.d(TAG, "onActivityCreated")
+                        Log.d(tag, "onActivityCreated")
                     }
 
                     override fun onActivityStarted(activity: Activity) {
-                        Log.d(TAG, "onActivityStarted")
+                        Log.d(tag, "onActivityStarted")
                     }
 
                     override fun onActivityResumed(activity: Activity) {
-                        Log.d(TAG, "onActivityResumed")
+                        Log.d(tag, "onActivityResumed")
                         onResume()
                     }
 
                     override fun onActivityPaused(activity: Activity) {
-                        Log.d(TAG, "onActivityPaused")
+                        Log.d(tag, "onActivityPaused")
                         onPause()
                     }
 
                     override fun onActivityStopped(activity: Activity) {
-                        Log.d(TAG, "onActivityStopped")
+                        Log.d(tag, "onActivityStopped")
                         // onStopped()
                         onPause()
                     }
@@ -585,10 +414,11 @@ internal class AndroidARView(
                     override fun onActivitySaveInstanceState(
                             activity: Activity,
                             outState: Bundle
-                    ) {}
+                    ) {
+                    }
 
                     override fun onActivityDestroyed(activity: Activity) {
-                        Log.d(TAG, "onActivityDestroyed")
+                        Log.d(tag, "onActivityDestroyed")
 //                        onPause()
 //                        onDestroy()
                     }
@@ -601,14 +431,12 @@ internal class AndroidARView(
         if (arSceneView == null) {
             return
         }
-
         if (arSceneView?.session == null) {
 
             // request camera permission if not already requested
             if (!ArCoreUtils.hasCameraPermission(activity)) {
-                ArCoreUtils.requestCameraPermission(activity, RC_PERMISSIONS)
+                ArCoreUtils.requestCameraPermission(activity, rcPermissions)
             }
-
             // If the session wasn't created yet, don't resume rendering.
             // This can happen if ARCore needs to be updated or permissions are not granted yet.
             try {
@@ -627,7 +455,6 @@ internal class AndroidARView(
                 ArCoreUtils.handleSessionException(activity, e)
             }
         }
-
         try {
             arSceneView?.resume()
         } catch (ex: CameraNotAvailableException) {
@@ -635,97 +462,29 @@ internal class AndroidARView(
             activity.finish()
             return
         }
-
-        // Create session if there is none
-        /*if (arSceneView.session == null) {
-            Log.d(TAG, "ARSceneView session is null. Trying to initialize")
-            try {
-                var session: Session? = null
-
-                if (ArCoreApk.getInstance().requestInstall(activity, mUserRequestedInstall) ==
-                        ArCoreApk.InstallStatus.INSTALL_REQUESTED) {
-                    Log.d(TAG, "Install of ArCore APK requested")
-                    session = null
-                } else {
-                    session = Session(activity)
-                }
-
-                if (session == null) {
-                    // Ensures next invocation of requestInstall() will either return
-                    // INSTALLED or throw an exception.
-                    mUserRequestedInstall = false
-                    return
-                } else {
-                    // Set a camera configuration that usese the front-facing camera.
-                    val config = Config(session)
-                    Log.d("TAG", "testtt")
-//                    val camConfigFilter = CameraConfigFilter(session)
-//                    Log.d("TAG", "testtt1")
-//                    camConfigFilter.setFacingDirection("FRONT_CAMERA")
-//                    Log.d("TAG", "testtt2")
-                    //config.augmentedFaceMode = Config.AugmentedFaceMode.MESH3D
-                    //config.setFacing = Conf
-                    config.updateMode = Config.UpdateMode.LATEST_CAMERA_IMAGE
-//                    session.cameraConfig = cameraConfig
-                    //config.focusMode = Config.FocusMode.AUTO
-                    session.configure(config)
-                    arSceneView?.setupSession(session)
-                }
-            } catch (ex: UnavailableUserDeclinedInstallationException) {
-                // Display an appropriate message to the user zand return gracefully.
-                Toast.makeText(
-                        activity,
-                        "TODO: handle exception " + ex.localizedMessage,
-                        Toast.LENGTH_LONG)
-                        .show()
-                return
-            } catch (ex: UnavailableArcoreNotInstalledException) {
-                Toast.makeText(activity, "Please install ARCore", Toast.LENGTH_LONG).show()
-                return
-            } catch (ex: UnavailableApkTooOldException) {
-                Toast.makeText(activity, "Please update ARCore", Toast.LENGTH_LONG).show()
-                return
-            } catch (ex: UnavailableSdkTooOldException) {
-                Toast.makeText(activity, "Please update this app", Toast.LENGTH_LONG).show()
-                return
-            } catch (ex: UnavailableDeviceNotCompatibleException) {
-                Toast.makeText(activity, "This device does not support AR", Toast.LENGTH_LONG)
-                        .show()
-                return
-            } catch (e: Exception) {
-                Toast.makeText(activity, "Failed to create AR session " + e, Toast.LENGTH_LONG).show()
-                //com.google.ar.core.exceptions.UnsupportdConfigurationException
-                return
-            }
-        }
-
-        try {
-            arSceneView.resume()
-        } catch (ex: CameraNotAvailableException) {
-            Log.d(TAG, "Unable to get camera" + ex)
-            activity.finish()
-            return
-        } catch (e : Exception){
-            return
-        }*/
     }
 
     fun onPause() {
-        // hide instructions view if no longer required
-        if (showAnimatedGuide){
-            val view = activity.findViewById(R.id.content) as ViewGroup
-            view.removeView(animatedGuide)
-            showAnimatedGuide = false
+        try {
+            arSceneView!!.pause()
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
-        arSceneView!!.pause()
     }
 
-    fun onDestroy(){
-        if (arSceneView?.session != null) {
+    private fun onDestroy() {
+        try {
+            arSceneView?.scene?.removeOnUpdateListener(sceneUpdateListener)
             arSceneView?.scene?.removeOnUpdateListener(faceSceneUpdateListener)
+            arSceneView?.scene?.removeOnPeekTouchListener(onNodeTapListener)
+            arSceneView?.session?.close()
             arSceneView?.destroy()
             arSceneView!!.setupSession(null)
+            arSceneView = null
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
+
     }
 
     private fun initializeARView(call: MethodCall, result: MethodChannel.Result) {
@@ -738,37 +497,21 @@ internal class AndroidARView(
         val argHandleTaps: Boolean? = call.argument<Boolean>("handleTaps")
         val argHandleRotation: Boolean? = call.argument<Boolean>("handleRotation")
         val argHandlePans: Boolean? = call.argument<Boolean>("handlePans")
-        val argShowAnimatedGuide: Boolean? = call.argument<Boolean>("showAnimatedGuide")
 
-
-        sceneUpdateListener = com.google.ar.sceneform.Scene.OnUpdateListener {
-            frameTime: FrameTime -> onFrame(frameTime)
+        sceneUpdateListener = Scene.OnUpdateListener {
+            onFrame()
         }
-        onNodeTapListener = com.google.ar.sceneform.Scene.OnPeekTouchListener { hitTestResult, motionEvent ->
-            //if (hitTestResult.node != null){
-                //transformationSystem.selectionVisualizer.applySelectionVisual(hitTestResult.node as TransformableNode)
-                //transformationSystem.selectNode(hitTestResult.node as TransformableNode)
-            //}
+        onNodeTapListener = Scene.OnPeekTouchListener { hitTestResult, motionEvent ->
             if (hitTestResult.node != null && motionEvent?.action == MotionEvent.ACTION_DOWN) {
                 objectManagerChannel.invokeMethod("onNodeTap", listOf(hitTestResult.node?.name))
             }
             transformationSystem.onTouch(
-                hitTestResult,
-                motionEvent
+                    hitTestResult,
+                    motionEvent
             )
         }
-
         arSceneView!!.scene?.addOnUpdateListener(sceneUpdateListener)
         arSceneView!!.scene?.addOnPeekTouchListener(onNodeTapListener)
-
-
-        // Configure Plane scanning guide
-        if (argShowAnimatedGuide == true) { // explicit comparison necessary because of nullable type
-            showAnimatedGuide = true
-            val view = activity.findViewById(R.id.content) as ViewGroup
-            animatedGuide = activity.layoutInflater.inflate(com.google.ar.sceneform.ux.R.layout.sceneform_plane_discovery_layout, null)
-            view.addView(animatedGuide)
-        }
 
         // Configure feature points
         if (argShowFeaturePoints ==
@@ -777,8 +520,8 @@ internal class AndroidARView(
             showFeaturePoints = true
         } else {
             showFeaturePoints = false
-            while (pointCloudNode.children?.size
-                    ?: 0 > 0) {
+            while ((pointCloudNode.children?.size
+                            ?: 0) > 0) {
                 pointCloudNode.children?.first()?.setParent(null)
             }
             pointCloudNode.setParent(null)
@@ -806,7 +549,7 @@ internal class AndroidARView(
         arSceneView!!.session?.configure(config)
 
         // Configure whether or not detected planes should be shown
-        arSceneView!!.planeRenderer.isVisible = if (argShowPlanes == true) true else false
+        arSceneView!!.planeRenderer.isVisible = argShowPlanes == true
         // Create custom plane renderer (use supplied texture & increase radius)
         argCustomPlaneTexturePath?.let {
             val loader: FlutterLoader = FlutterInjector.instance().flutterLoader()
@@ -828,7 +571,7 @@ internal class AndroidARView(
                         }
                     }
             // Set radius to render planes in
-            arSceneView!!.scene.addOnUpdateListener { frameTime: FrameTime? ->
+            arSceneView!!.scene.addOnUpdateListener {
                 val planeRenderer = arSceneView!!.planeRenderer
                 planeRenderer.material.thenAccept { material: Material ->
                     material.setFloat(
@@ -837,7 +580,6 @@ internal class AndroidARView(
                 }
             }
         }
-
         // Configure world origin
         if (argShowWorldOrigin == true) {
             worldOriginNode = modelBuilder.makeWorldOriginNode(viewContext)
@@ -845,52 +587,26 @@ internal class AndroidARView(
         } else {
             worldOriginNode.setParent(null)
         }
-
         // Configure Tap handling
         if (argHandleTaps == true) { // explicit comparison necessary because of nullable type
-            arSceneView!!.scene.setOnTouchListener{ hitTestResult: HitTestResult, motionEvent: MotionEvent? -> onTap(hitTestResult, motionEvent) }
+            arSceneView!!.scene.setOnTouchListener { hitTestResult: HitTestResult, motionEvent: MotionEvent? -> onTap(hitTestResult, motionEvent) }
         }
-
         // Configure gestures
-        if (argHandleRotation ==
-                true) { // explicit comparison necessary because of nullable type
-            enableRotation = true
-        } else {
-            enableRotation = false
-        }
-        if (argHandlePans ==
-                true) { // explicit comparison necessary because of nullable type
-            enablePans = true
-        } else {
-            enablePans = false
-        }
-
+        enableRotation = argHandleRotation == true
+        enablePans = argHandlePans == true
         result.success(null)
     }
 
-    private fun onFrame(frameTime: FrameTime) {
-        // hide instructions view if no longer required
-        if (showAnimatedGuide && arSceneView?.arFrame != null){
-            for (plane in arSceneView!!.arFrame!!.getUpdatedTrackables(Plane::class.java)) {
-                if (plane.trackingState === TrackingState.TRACKING) {
-                    val view = activity.findViewById(R.id.content) as ViewGroup
-                    view.removeView(animatedGuide)
-                    showAnimatedGuide = false
-                    break
-                }
-            }
-        }
-
+    private fun onFrame() {
         if (showFeaturePoints) {
             // remove points from last frame
-            while (pointCloudNode.children?.size
-                    ?: 0 > 0) {
+            while ((pointCloudNode.children?.size
+                            ?: 0) > 0) {
                 pointCloudNode.children?.first()?.setParent(null)
             }
-            var pointCloud = arSceneView!!.arFrame?.acquirePointCloud()
-            // Access point cloud data (returns FloatBufferw with x,y,z coordinates and confidence
-            // value).
-            val points = pointCloud?.getPoints() ?: FloatBuffer.allocate(0)
+            val pointCloud = arSceneView!!.arFrame?.acquirePointCloud()
+            // Access point cloud data (returns FloatBufferW with x,y,z coordinates and confidence value).
+            val points = pointCloud?.points ?: FloatBuffer.allocate(0)
             // Check if there are any feature points
             if (points.limit() / 4 >= 1) {
                 for (index in 0 until points.limit() / 4) {
@@ -909,176 +625,24 @@ internal class AndroidARView(
         }
         val updatedAnchors = arSceneView!!.arFrame!!.updatedAnchors
         // Notify the cloudManager of all the updates.
-        if (this::cloudAnchorHandler.isInitialized) {cloudAnchorHandler.onUpdate(updatedAnchors)}
+        if (this::cloudAnchorHandler.isInitialized) {
+            cloudAnchorHandler.onUpdate(updatedAnchors)
+        }
 
-        if (keepNodeSelected && transformationSystem.selectedNode != null && transformationSystem.selectedNode!!.isTransforming){
+        if (keepNodeSelected && transformationSystem.selectedNode != null && transformationSystem.selectedNode!!.isTransforming) {
             // If the selected node is currently transforming, we want to deselect it as soon as the transformation is done
             keepNodeSelected = false
         }
-        if (!keepNodeSelected && transformationSystem.selectedNode != null && !transformationSystem.selectedNode!!.isTransforming){
+        if (!keepNodeSelected && transformationSystem.selectedNode != null && !transformationSystem.selectedNode!!.isTransforming) {
             // once the transformation is done, deselect the node and allow selection of another node
             transformationSystem.selectNode(null)
             keepNodeSelected = true
         }
-        if (!enablePans && !enableRotation){
+        if (!enablePans && !enableRotation) {
             //unselect all nodes as we do not want the selection visualizer
             transformationSystem.selectNode(null)
         }
 
-    }
-
-    private fun addNode(dict_node: HashMap<String, Any>, dict_anchor: HashMap<String, Any>? = null): CompletableFuture<Boolean>{
-        val completableFutureSuccess: CompletableFuture<Boolean> = CompletableFuture()
-
-        try {
-            when (dict_node["type"] as Int) {
-                0 -> { // GLTF2 Model from Flutter asset folder
-                    // Get path to given Flutter asset
-                    val loader: FlutterLoader = FlutterInjector.instance().flutterLoader()
-                    val key: String = loader.getLookupKeyForAsset(dict_node["uri"] as String)
-
-                    // Add object to scene
-                    modelBuilder.makeNodeFromGltf(viewContext, transformationSystem, objectManagerChannel, enablePans, enableRotation, dict_node["name"] as String, key, dict_node["transformation"] as ArrayList<Double>)
-                            .thenAccept{node ->
-                                val anchorName: String? = dict_anchor?.get("name") as? String
-                                val anchorType: Int? = dict_anchor?.get("type") as? Int
-                                if (anchorName != null && anchorType != null) {
-                                    val anchorNode = arSceneView!!.scene.findByName(anchorName) as AnchorNode?
-                                    if (anchorNode != null) {
-                                        anchorNode.addChild(node)
-                                        completableFutureSuccess.complete(true)
-                                    } else {
-                                        completableFutureSuccess.complete(false)
-                                    }
-                                } else {
-                                    arSceneView!!.scene.addChild(node)
-                                    completableFutureSuccess.complete(true)
-                                }
-                                completableFutureSuccess.complete(false)
-                            }
-                            .exceptionally { throwable ->
-                                // Pass error to session manager (this has to be done on the main thread if this activity)
-                                val mainHandler = Handler(viewContext.mainLooper)
-                                val runnable = Runnable {sessionManagerChannel.invokeMethod("onError", listOf("Unable to load renderable" +  dict_node["uri"] as String)) }
-                                mainHandler.post(runnable)
-                                completableFutureSuccess.completeExceptionally(throwable)
-                                null // return null because java expects void return (in java, void has no instance, whereas in Kotlin, this closure returns a Unit which has one instance)
-                            }
-                }
-                1 -> { // GLB Model from the web
-                    modelBuilder.makeNodeFromGlb(viewContext, transformationSystem, objectManagerChannel, enablePans, enableRotation, dict_node["name"] as String, dict_node["uri"] as String, dict_node["transformation"] as ArrayList<Double>)
-                            .thenAccept{node ->
-                                val anchorName: String? = dict_anchor?.get("name") as? String
-                                val anchorType: Int? = dict_anchor?.get("type") as? Int
-                                if (anchorName != null && anchorType != null) {
-                                    val anchorNode = arSceneView!!.scene.findByName(anchorName) as AnchorNode?
-                                    if (anchorNode != null) {
-                                        anchorNode.addChild(node)
-                                        completableFutureSuccess.complete(true)
-                                    } else {
-                                        completableFutureSuccess.complete(false)
-                                    }
-                                } else {
-                                    arSceneView!!.scene.addChild(node)
-                                    completableFutureSuccess.complete(true)
-                                }
-                                completableFutureSuccess.complete(false)
-                            }
-                            .exceptionally { throwable ->
-                                // Pass error to session manager (this has to be done on the main thread if this activity)
-                                val mainHandler = Handler(viewContext.mainLooper)
-                                val runnable = Runnable {sessionManagerChannel.invokeMethod("onError", listOf("Unable to load renderable" +  dict_node["uri"] as String)) }
-                                mainHandler.post(runnable)
-                                completableFutureSuccess.completeExceptionally(throwable)
-                                null // return null because java expects void return (in java, void has no instance, whereas in Kotlin, this closure returns a Unit which has one instance)
-                            }
-                }
-                2 -> { // fileSystemAppFolderGLB
-                    val documentsPath = viewContext.getApplicationInfo().dataDir
-                    val assetPath = documentsPath + "/app_flutter/" + dict_node["uri"] as String
-
-                    modelBuilder.makeNodeFromGlb(viewContext, transformationSystem, objectManagerChannel, enablePans, enableRotation, dict_node["name"] as String, assetPath as String, dict_node["transformation"] as ArrayList<Double>) //
-                            .thenAccept{node ->
-                                val anchorName: String? = dict_anchor?.get("name") as? String
-                                val anchorType: Int? = dict_anchor?.get("type") as? Int
-                                if (anchorName != null && anchorType != null) {
-                                    val anchorNode = arSceneView!!.scene.findByName(anchorName) as AnchorNode?
-                                    if (anchorNode != null) {
-                                        anchorNode.addChild(node)
-                                        completableFutureSuccess.complete(true)
-                                    } else {
-                                        completableFutureSuccess.complete(false)
-                                    }
-                                } else {
-                                    arSceneView!!.scene.addChild(node)
-                                    completableFutureSuccess.complete(true)
-                                }
-                                completableFutureSuccess.complete(false)
-                            }
-                            .exceptionally { throwable ->
-                                // Pass error to session manager (this has to be done on the main thread if this activity)
-                                val mainHandler = Handler(viewContext.mainLooper)
-                                val runnable = Runnable {sessionManagerChannel.invokeMethod("onError", listOf("Unable to load renderable " +  dict_node["uri"] as String)) }
-                                mainHandler.post(runnable)
-                                completableFutureSuccess.completeExceptionally(throwable)
-                                null // return null because java expects void return (in java, void has no instance, whereas in Kotlin, this closure returns a Unit which has one instance)
-                            }
-                }
-                3 -> { //fileSystemAppFolderGLTF2
-                    // Get path to given Flutter asset
-                    val documentsPath = viewContext.getApplicationInfo().dataDir
-                    val assetPath = documentsPath + "/app_flutter/" + dict_node["uri"] as String
-
-                    // Add object to scene
-                    modelBuilder.makeNodeFromGltf(viewContext, transformationSystem, objectManagerChannel, enablePans, enableRotation, dict_node["name"] as String, assetPath, dict_node["transformation"] as ArrayList<Double>)
-                            .thenAccept{node ->
-                                val anchorName: String? = dict_anchor?.get("name") as? String
-                                val anchorType: Int? = dict_anchor?.get("type") as? Int
-                                if (anchorName != null && anchorType != null) {
-                                    val anchorNode = arSceneView!!.scene.findByName(anchorName) as AnchorNode?
-                                    if (anchorNode != null) {
-                                        anchorNode.addChild(node)
-                                        completableFutureSuccess.complete(true)
-                                    } else {
-                                        completableFutureSuccess.complete(false)
-                                    }
-                                } else {
-                                    arSceneView!!.scene.addChild(node)
-                                    completableFutureSuccess.complete(true)
-                                }
-                                completableFutureSuccess.complete(false)
-                            }
-                            .exceptionally { throwable ->
-                                // Pass error to session manager (this has to be done on the main thread if this activity)
-                                val mainHandler = Handler(viewContext.mainLooper)
-                                val runnable = Runnable {sessionManagerChannel.invokeMethod("onError", listOf("Unable to load renderable" +  dict_node["uri"] as String)) }
-                                mainHandler.post(runnable)
-                                completableFutureSuccess.completeExceptionally(throwable)
-                                null // return null because java expects void return (in java, void has no instance, whereas in Kotlin, this closure returns a Unit which has one instance)
-                            }
-                }
-                else -> {
-                    completableFutureSuccess.complete(false)
-                }
-            }
-        } catch (e: java.lang.Exception) {
-            completableFutureSuccess.completeExceptionally(e)
-        }
-
-        return completableFutureSuccess
-    }
-
-    private fun transformNode(name: String, transform: ArrayList<Double>) {
-        val node = arSceneView!!.scene.findByName(name)
-        node?.let {
-            val transformTriple = deserializeMatrix4(transform)
-            it.localScale = transformTriple.first
-            it.localPosition = transformTriple.second
-            it.localRotation = transformTriple.third
-            //it.worldScale = transformTriple.first
-            //it.worldPosition = transformTriple.second
-            //it.worldRotation = transformTriple.third
-        }
     }
 
     private fun onTap(hitTestResult: HitTestResult, motionEvent: MotionEvent?): Boolean {
@@ -1088,19 +652,19 @@ internal class AndroidARView(
             return true
         }
         if (motionEvent != null && motionEvent.action == MotionEvent.ACTION_DOWN) {
-            if (transformationSystem.selectedNode == null || (!enablePans && !enableRotation)){
+            return if (transformationSystem.selectedNode == null || (!enablePans && !enableRotation)) {
                 val allHitResults = frame?.hitTest(motionEvent) ?: listOf<HitResult>()
                 val planeAndPointHitResults =
-                    allHitResults.filter { ((it.trackable is Plane) || (it.trackable is Point)) }
+                        allHitResults.filter { ((it.trackable is Plane) || (it.trackable is Point)) }
                 val serializedPlaneAndPointHitResults: ArrayList<HashMap<String, Any>> =
-                    ArrayList(planeAndPointHitResults.map { serializeHitResult(it) })
+                        ArrayList(planeAndPointHitResults.map { serializeHitResult(it) })
                 sessionManagerChannel.invokeMethod(
-                    "onPlaneOrPointTap",
-                    serializedPlaneAndPointHitResults
+                        "onPlaneOrPointTap",
+                        serializedPlaneAndPointHitResults
                 )
-                return true
+                true
             } else {
-                return false
+                false
             }
 
         }
@@ -1123,12 +687,12 @@ internal class AndroidARView(
 
     private fun removeAnchor(name: String) {
         val anchorNode = arSceneView!!.scene.findByName(name) as AnchorNode?
-        anchorNode?.let{
+        anchorNode?.let {
             // Remove corresponding anchor from tracking
             anchorNode.anchor?.detach()
             // Remove children
             for (node in anchorNode.children) {
-                if (transformationSystem.selectedNode?.name == node.name){
+                if (transformationSystem.selectedNode?.name == node.name) {
                     transformationSystem.selectNode(null)
                     keepNodeSelected = true
                 }
@@ -1139,11 +703,11 @@ internal class AndroidARView(
         }
     }
 
-    private inner class cloudAnchorUploadedListener: CloudAnchorHandler.CloudAnchorListener {
+    private inner class CloudAnchorUploadedListener : CloudAnchorHandler.CloudAnchorListener {
         override fun onCloudTaskComplete(anchorName: String?, anchor: Anchor?) {
             val cloudState = anchor!!.cloudAnchorState
             if (cloudState.isError) {
-                Log.e(TAG, "Error uploading anchor, state $cloudState")
+                Log.e(tag, "Error uploading anchor, state $cloudState")
                 sessionManagerChannel.invokeMethod("onError", listOf("Error uploading anchor, state $cloudState"))
                 return
             }
@@ -1160,22 +724,20 @@ internal class AndroidARView(
         }
     }
 
-    private inner class cloudAnchorDownloadedListener: CloudAnchorHandler.CloudAnchorListener {
+    private inner class CloudAnchorDownloadedListener : CloudAnchorHandler.CloudAnchorListener {
         override fun onCloudTaskComplete(anchorName: String?, anchor: Anchor?) {
             val cloudState = anchor!!.cloudAnchorState
             if (cloudState.isError) {
-                Log.e(TAG, "Error downloading anchor, state $cloudState")
+                Log.e(tag, "Error downloading anchor, state $cloudState")
                 sessionManagerChannel.invokeMethod("onError", listOf("Error downloading anchor, state $cloudState"))
                 return
             }
-            //Log.d(TAG, "---------------- RESOLVING SUCCESSFUL ------------------")
             val newAnchorNode = AnchorNode(anchor)
             // Register new anchor on the Flutter side of the plugin
-            anchorManagerChannel.invokeMethod("onAnchorDownloadSuccess", serializeAnchor(newAnchorNode, anchor), object: MethodChannel.Result {
+            anchorManagerChannel.invokeMethod("onAnchorDownloadSuccess", serializeAnchor(newAnchorNode, anchor), object : MethodChannel.Result {
                 override fun success(result: Any?) {
                     newAnchorNode.name = result.toString()
                     newAnchorNode.setParent(arSceneView!!.scene)
-                    //Log.d(TAG, "---------------- REGISTERING ANCHOR SUCCESSFUL ------------------")
                 }
 
                 override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {

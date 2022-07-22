@@ -62,7 +62,7 @@ class _MyAppState extends State<MyApp> {
           title: const Text(_title),
         ),
         body: Column(children: [
-          Text('Running on: $_platformVersion\n'),
+          // Text('Running on: $_platformVersion\n'),
           Expanded(
             child: ExampleList(),
           ),
